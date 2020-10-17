@@ -11,6 +11,35 @@ class Mysql2AdapterTest < ActiveRecord::Mysql2TestCase
     @connection_handler = ActiveRecord::Base.connection_handler
   end
 
+  def test_connection_error
+    assert_raises ActiveRecord::ConnectionNotEstablished do
+      ActiveRecord::Base.mysql2_connection(socket: File::NULL)
+    end
+  end
+
+  def test_reconnection_error
+    fake_connection = Class.new do
+      def query_options
+        {}
+      end
+
+      def query(*)
+      end
+
+      def close
+      end
+    end.new
+    @conn = ActiveRecord::ConnectionAdapters::Mysql2Adapter.new(
+      fake_connection,
+      ActiveRecord::Base.logger,
+      nil,
+      { socket: File::NULL }
+    )
+    assert_raises ActiveRecord::ConnectionNotEstablished do
+      @conn.reconnect!
+    end
+  end
+
   def test_exec_query_nothing_raises_with_no_result_queries
     assert_nothing_raised do
       with_example_table do
@@ -62,12 +91,13 @@ class Mysql2AdapterTest < ActiveRecord::Mysql2TestCase
   end
 
   def test_columns_for_distinct_with_arel_order
-    order = Object.new
-    def order.to_sql
-      "posts.created_at desc"
-    end
+    Arel::Table.engine = nil # should not rely on the global Arel::Table.engine
+
+    order = Arel.sql("posts.created_at").desc
     assert_equal "posts.created_at AS alias_0, posts.id",
       @conn.columns_for_distinct("posts.id", [order])
+  ensure
+    Arel::Table.engine = ActiveRecord::Base
   end
 
   def test_errors_for_bigint_fks_on_integer_pk_table_in_alter_table

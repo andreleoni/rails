@@ -320,6 +320,17 @@ module ApplicationTests
       end
     end
 
+    def test_run_windows_style_path
+      create_test_file :models, "account"
+      create_test_file :controllers, "accounts_controller"
+
+      # double-escape backslash -- once for Ruby and again for shelling out
+      run_test_command("test\\\\models").tap do |output|
+        assert_match "AccountTest", output
+        assert_match "1 runs, 1 assertions, 0 failures, 0 errors, 0 skips", output
+      end
+    end
+
     def test_run_with_ruby_command
       app_file "test/models/post_test.rb", <<-RUBY
         require "test_helper"
@@ -497,28 +508,6 @@ module ApplicationTests
         assert_match "by line", output
         assert_match "by name", output
         assert_match "2 runs, 2 assertions", output
-      end
-    end
-
-    def test_shows_filtered_backtrace_by_default
-      create_backtrace_test
-
-      assert_match "Rails::BacktraceCleaner", run_test_command("test/unit/backtrace_test.rb")
-    end
-
-    def test_backtrace_option
-      create_backtrace_test
-
-      assert_match "Minitest::BacktraceFilter", run_test_command("test/unit/backtrace_test.rb -b")
-      assert_match "Minitest::BacktraceFilter",
-        run_test_command("test/unit/backtrace_test.rb --backtrace")
-    end
-
-    def test_show_full_backtrace_using_backtrace_environment_variable
-      create_backtrace_test
-
-      switch_env "BACKTRACE", "true" do
-        assert_match "Minitest::BacktraceFilter", run_test_command("test/unit/backtrace_test.rb")
       end
     end
 
@@ -895,6 +884,21 @@ module ApplicationTests
       assert_match "1 runs, 1 assertions, 0 failures, 0 errors, 0 skips", output
     end
 
+    def test_can_exclude_files_from_being_tested_via_default_rails_command_by_setting_DEFAULT_TEST_EXCLUDE_env_var
+      create_test_file "smoke", "smoke_foo"
+
+      switch_env "DEFAULT_TEST_EXCLUDE", "test/smoke/**/*_test.rb" do
+        assert_match "0 runs, 0 assertions, 0 failures, 0 errors, 0 skips", run_test_command("")
+      end
+    end
+
+    def test_can_exclude_files_from_being_tested_via_rake_task_by_setting_DEFAULT_TEST_EXCLUDE_env_var
+      create_test_file "smoke", "smoke_foo"
+
+      output = Dir.chdir(app_path) { `DEFAULT_TEST_EXCLUDE="test/smoke/**/*_test.rb" bin/rake test` }
+      assert_match "0 runs, 0 assertions, 0 failures, 0 errors, 0 skips", output
+    end
+
     private
       def run_test_command(arguments = "test/unit/test_test.rb", **opts)
         rails "t", *Shellwords.split(arguments), allow_failure: true, **opts
@@ -925,18 +929,6 @@ module ApplicationTests
           class #{name.camelize}Test < ActiveSupport::TestCase
             def test_fixture
               puts "\#{User.count} users (\#{__FILE__})"
-            end
-          end
-        RUBY
-      end
-
-      def create_backtrace_test
-        app_file "test/unit/backtrace_test.rb", <<-RUBY
-          require "test_helper"
-
-          class BacktraceTest < ActiveSupport::TestCase
-            def test_backtrace
-              puts Minitest.backtrace_filter
             end
           end
         RUBY

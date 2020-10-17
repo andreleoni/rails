@@ -16,6 +16,48 @@ module ActiveRecord
         @connection_handler = ActiveRecord::Base.connection_handler
       end
 
+      def test_connection_error
+        assert_raises ActiveRecord::ConnectionNotEstablished do
+          ActiveRecord::Base.postgresql_connection(host: File::NULL)
+        end
+      end
+
+      def test_reconnection_error
+        fake_connection = Class.new do
+          def async_exec(*)
+            [{}]
+          end
+
+          def type_map_for_queries=(_)
+          end
+
+          def type_map_for_results=(_)
+          end
+
+          def exec_params(*)
+            {}
+          end
+
+          def reset
+            raise PG::ConnectionBad
+          end
+
+          def close
+          end
+        end.new
+
+        @conn = ActiveRecord::ConnectionAdapters::PostgreSQLAdapter.new(
+          fake_connection,
+          ActiveRecord::Base.logger,
+          nil,
+          { host: File::NULL }
+        )
+
+        assert_raises ActiveRecord::ConnectionNotEstablished do
+          @conn.reconnect!
+        end
+      end
+
       def test_bad_connection
         assert_raise ActiveRecord::NoDatabaseError do
           db_config = ActiveRecord::Base.configurations.configs_for(env_name: "arunit", name: "primary")
@@ -302,12 +344,13 @@ module ActiveRecord
       end
 
       def test_columns_for_distinct_with_arel_order
-        order = Object.new
-        def order.to_sql
-          "posts.created_at desc"
-        end
+        Arel::Table.engine = nil # should not rely on the global Arel::Table.engine
+
+        order = Arel.sql("posts.created_at").desc
         assert_equal "posts.created_at AS alias_0, posts.id",
           @connection.columns_for_distinct("posts.id", [order])
+      ensure
+        Arel::Table.engine = ActiveRecord::Base
       end
 
       def test_columns_for_distinct_with_nulls

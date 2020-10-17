@@ -106,7 +106,6 @@ module ActionView
         SameCollectionIterator.new(collection, partial, iter_vars)
       end
 
-
       template = find_template(partial, @locals.keys + iter_vars)
 
       layout = if !block && (layout = @options[:layout])
@@ -144,6 +143,7 @@ module ActionView
         ActiveSupport::Notifications.instrument(
           "render_collection.action_view",
           identifier: identifier,
+          layout: layout && layout.virtual_path,
           count: collection.size
         ) do |payload|
           spacer = if @options.key?(:spacer_template)

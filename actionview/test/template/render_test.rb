@@ -2,7 +2,7 @@
 
 require "abstract_unit"
 require "controller/fake_models"
-require "test_component"
+require "test_renderable"
 require "active_model/validations"
 
 class TestController < ActionController::Base
@@ -22,6 +22,7 @@ module RenderTestCases
 
     controller = TestController.new
     controller.perform_caching = true
+    controller.cache_store = :memory_store
     @view.controller = controller
 
     @controller_view = controller.view_context_class.with_empty_template_cache.new(
@@ -57,6 +58,11 @@ module RenderTestCases
     ] }, rendered_templates)
   end
 
+  def test_explicit_js_format_adds_html_fallback
+    rendered_templates = @controller_view.render(template: "test/js_html_fallback", formats: :js)
+    assert_equal(%Q(document.write("<b>Hello from a HTML partial!<\\/b>")\n), rendered_templates)
+  end
+
   def test_render_without_options
     e = assert_raises(ArgumentError) { @view.render() }
     assert_match(/You invoked render but did not give any of (.+) option\./, e.message)
@@ -65,7 +71,6 @@ module RenderTestCases
   def test_render_template
     assert_equal "Hello world!", @view.render(template: "test/hello_world")
   end
-
 
   def test_render_file
     assert_equal "Hello world!", assert_deprecated { @view.render(file: "test/hello_world") }
@@ -321,7 +326,12 @@ module RenderTestCases
     assert_equal File.expand_path("#{FIXTURE_LOAD_PATH}/test/_raise.html.erb"), e.file_name
   end
 
-  def test_render_object
+  def test_undefined_method_error_references_named_class
+    e = assert_raises(ActionView::Template::Error) { @view.render(inline: "<%= undefined %>") }
+    assert_match(/`undefined' for #<ActionView::Base:0x[0-9a-f]+>/, e.message)
+  end
+
+  def test_render_renderable_object
     assert_equal "Hello: david", @view.render(partial: "test/customer", object: Customer.new("david"))
     assert_equal "FalseClass", @view.render(partial: "test/klass", object: false)
     assert_equal "NilClass", @view.render(partial: "test/klass", object: nil)
@@ -687,10 +697,10 @@ module RenderTestCases
     assert_raises(ArgumentError) { ActionView::Template.register_template_handler CustomHandler }
   end
 
-  def test_render_component
+  def test_render_object
     assert_equal(
       %(Hello, World!),
-      @view.render(TestComponent.new)
+      @view.render(TestRenderable.new)
     )
   end
 end
@@ -704,6 +714,13 @@ class CachedViewRenderTest < ActiveSupport::TestCase
     view_paths = ActionController::Base.view_paths
     assert_equal ActionView::OptimizedFileSystemResolver, view_paths.first.class
     setup_view(view_paths)
+  end
+
+  def test_cache_fragments_inside_render_layout_call_with_block
+    cat = @view.render(template: "test/cache_fragment_inside_render_layout_block_1")
+    dog = @view.render(template: "test/cache_fragment_inside_render_layout_block_2")
+
+    assert_not_equal cat, dog
   end
 end
 

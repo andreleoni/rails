@@ -50,9 +50,9 @@ module ActionDispatch
     ENV_METHODS.each do |env|
       class_eval <<-METHOD, __FILE__, __LINE__ + 1
         # frozen_string_literal: true
-        def #{env.sub(/^HTTP_/n, '').downcase}  # def accept_charset
-          get_header "#{env}"                   #   get_header "HTTP_ACCEPT_CHARSET"
-        end                                     # end
+        def #{env.delete_prefix("HTTP_").downcase}  # def accept_charset
+          get_header "#{env}"                       #   get_header "HTTP_ACCEPT_CHARSET"
+        end                                         # end
       METHOD
     end
 
@@ -334,7 +334,7 @@ module ActionDispatch
     # variable is already set, wrap it in a StringIO.
     def body
       if raw_post = get_header("RAW_POST_DATA")
-        raw_post = raw_post.dup.force_encoding(Encoding::BINARY)
+        raw_post = (+raw_post).force_encoding(Encoding::BINARY)
         StringIO.new(raw_post)
       else
         body_stream
@@ -379,6 +379,9 @@ module ActionDispatch
     def GET
       fetch_header("action_dispatch.request.query_parameters") do |k|
         rack_query_params = super || {}
+        controller = path_parameters[:controller]
+        action = path_parameters[:action]
+        rack_query_params = Request::Utils.set_binary_encoding(self, rack_query_params, controller, action)
         # Check for non UTF-8 parameter values, which would cause errors later
         Request::Utils.check_param_encoding(rack_query_params)
         set_header k, Request::Utils.normalize_encode_params(rack_query_params)
@@ -394,6 +397,8 @@ module ActionDispatch
         pr = parse_formatted_parameters(params_parsers) do |params|
           super || {}
         end
+        pr = Request::Utils.set_binary_encoding(self, pr, path_parameters[:controller], path_parameters[:action])
+        Request::Utils.check_param_encoding(pr)
         self.request_parameters = Request::Utils.normalize_encode_params(pr)
       end
     rescue Rack::Utils::ParameterTypeError, Rack::Utils::InvalidParameterError => e
@@ -429,6 +434,10 @@ module ActionDispatch
 
     def ssl?
       super || scheme == "wss"
+    end
+
+    def inspect # :nodoc:
+      "#<#{self.class.name} #{method} #{original_url.dump} for #{remote_ip}>"
     end
 
     private

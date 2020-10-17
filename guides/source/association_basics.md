@@ -86,7 +86,7 @@ In the remainder of this guide, you'll learn how to declare and use the various 
 
 ### The `belongs_to` Association
 
-A `belongs_to` association sets up a one-to-one connection with another model, such that each instance of the declaring model "belongs to" one instance of the other model. For example, if your application includes authors and books, and each book can be assigned to exactly one author, you'd declare the book model this way:
+A `belongs_to` association sets up a connection with another model, such that each instance of the declaring model "belongs to" one instance of the other model. For example, if your application includes authors and books, and each book can be assigned to exactly one author, you'd declare the book model this way:
 
 ```ruby
 class Book < ApplicationRecord
@@ -117,15 +117,31 @@ class CreateBooks < ActiveRecord::Migration[6.0]
 end
 ```
 
+When used alone, `belongs_to` produces a one-directional one-to-one connection. Therefore each book in the above example "knows" its author, but the authors don't know about their books.
+To setup a [bi-directional association](#bi-directional-associations) - use `belongs_to` in combination with a `has_one` or `has_many` on the other model.
+
+`belongs_to` does not ensure reference consistency, so depending on the use case, you might also need to add a database-level foreign key constraint on the reference column, like this:
+
+```ruby
+create_table :books do |t|
+  t.belongs_to :author, foreign_key: true
+  # ...
+end
+```
+
 ### The `has_one` Association
 
-A `has_one` association also sets up a one-to-one connection with another model, but with somewhat different semantics (and consequences). This association indicates that each instance of a model contains or possesses one instance of another model. For example, if each supplier in your application has only one account, you'd declare the supplier model like this:
+A `has_one` association indicates that one other model has a reference to this model. That model can be fetched through this association.
+
+For example, if each supplier in your application has only one account, you'd declare the supplier model like this:
 
 ```ruby
 class Supplier < ApplicationRecord
   has_one :account
 end
 ```
+
+The main difference from `belongs_to` is that the link column `supplier_id` is located in the other table:
 
 ![has_one Association Diagram](images/association_basics/has_one.png)
 
@@ -159,9 +175,11 @@ create_table :accounts do |t|
 end
 ```
 
+This relation can be [bi-directional](#bi-directional-associations) when used in combination with `belongs_to` on the other model.
+
 ### The `has_many` Association
 
-A `has_many` association indicates a one-to-many connection with another model. You'll often find this association on the "other side" of a `belongs_to` association. This association indicates that each instance of the model has zero or more instances of another model. For example, in an application containing authors and books, the author model could be declared like this:
+A `has_many` association is similar to `has_one`, but indicates a one-to-many connection with another model. You'll often find this association on the "other side" of a `belongs_to` association. This association indicates that each instance of the model has zero or more instances of another model. For example, in an application containing authors and books, the author model could be declared like this:
 
 ```ruby
 class Author < ApplicationRecord
@@ -189,6 +207,16 @@ class CreateAuthors < ActiveRecord::Migration[6.0]
       t.timestamps
     end
   end
+end
+```
+
+Depending on the use case, it's usually a good idea to create a non-unique index and optionally
+a foreign key constraint on the author column for the books table:
+
+```ruby
+create_table :books do |t|
+  t.belongs_to :author, index: true, foreign_key: true
+  # ...
 end
 ```
 
@@ -328,7 +356,9 @@ end
 
 ### The `has_and_belongs_to_many` Association
 
-A `has_and_belongs_to_many` association creates a direct many-to-many connection with another model, with no intervening model. For example, if your application includes assemblies and parts, with each assembly having many parts and each part appearing in many assemblies, you could declare the models this way:
+A `has_and_belongs_to_many` association creates a direct many-to-many connection with another model, with no intervening model.
+This association indicates that each instance of the declaring model refers to zero or more instances of another model.
+For example, if your application includes assemblies and parts, with each assembly having many parts and each part appearing in many assemblies, you could declare the models this way:
 
 ```ruby
 class Assembly < ApplicationRecord
@@ -517,7 +547,7 @@ In your migrations/schema, you will add a references column to the model itself.
 class CreateEmployees < ActiveRecord::Migration[6.0]
   def change
     create_table :employees do |t|
-      t.references :manager
+      t.references :manager, foreign_key: { to_table: :employees }
       t.timestamps
     end
   end
@@ -540,7 +570,7 @@ Here are a few things you should know to make efficient use of Active Record ass
 All of the association methods are built around caching, which keeps the result of the most recent query available for further operations. The cache is even shared across methods. For example:
 
 ```ruby
-author.books                 # retrieves books from the database
+author.books.load            # retrieves books from the database
 author.books.size            # uses the cached copy of books
 author.books.empty?          # uses the cached copy of books
 ```
@@ -548,7 +578,7 @@ author.books.empty?          # uses the cached copy of books
 But what if you want to reload the cache, because data might have been changed by some other part of the application? Just call `reload` on the association:
 
 ```ruby
-author.books                 # retrieves books from the database
+author.books.load            # retrieves books from the database
 author.books.size            # uses the cached copy of books
 author.books.reload.empty?   # discards the cached copy of books
                              # and goes back to the database
@@ -783,7 +813,10 @@ The following sections give the details of each type of association, including t
 
 ### `belongs_to` Association Reference
 
-The `belongs_to` association creates a one-to-one match with another model. In database terms, this association says that this class contains the foreign key. If the other class contains the foreign key, then you should use `has_one` instead.
+In database terms, the `belongs_to` association says that this model's table contains a column which represents a reference to another table.
+This can be used to set up one-to-one or one-to-many relations, depending on the setup.
+If the table of the other class contains the reference in a one-to-one relation, then you should use `has_one` instead.
+
 
 #### Methods Added by `belongs_to`
 
@@ -1581,7 +1614,7 @@ The `collection.size` method returns the number of objects in the collection.
 
 ##### `collection.find(...)`
 
-The `collection.find` method finds objects within the collection. It uses the same syntax and options as
+The `collection.find` method finds objects within the collection's table. It uses the same syntax and options as
 [`ActiveRecord::Base.find`](https://api.rubyonrails.org/classes/ActiveRecord/FinderMethods.html#method-i-find).
 
 ```ruby
@@ -1600,7 +1633,7 @@ The `collection.where` method finds objects within the collection based on the c
 ##### `collection.exists?(...)`
 
 The `collection.exists?` method checks whether an object meeting the supplied
-conditions exists in the collection. It uses the same syntax and options as
+conditions exists in the collection's table. It uses the same syntax and options as
 [`ActiveRecord::Base.exists?`](https://api.rubyonrails.org/classes/ActiveRecord/FinderMethods.html#method-i-exists-3F).
 
 ##### `collection.build(attributes = {}, ...)`
@@ -2128,7 +2161,7 @@ The `collection.size` method returns the number of objects in the collection.
 
 ##### `collection.find(...)`
 
-The `collection.find` method finds objects within the collection. It uses the same syntax and options as
+The `collection.find` method finds objects within the collection's table. It uses the same syntax and options as
 [`ActiveRecord::Base.find`](https://api.rubyonrails.org/classes/ActiveRecord/FinderMethods.html#method-i-find).
 
 ```ruby
@@ -2146,7 +2179,7 @@ The `collection.where` method finds objects within the collection based on the c
 ##### `collection.exists?(...)`
 
 The `collection.exists?` method checks whether an object meeting the supplied
-conditions exists in the collection. It uses the same syntax and options as
+conditions exists in the collection's table. It uses the same syntax and options as
 [`ActiveRecord::Base.exists?`](https://api.rubyonrails.org/classes/ActiveRecord/FinderMethods.html#method-i-exists-3F).
 
 ##### `collection.build(attributes = {})`
@@ -2400,8 +2433,16 @@ class Author < ApplicationRecord
 end
 ```
 
-If a `before_add` callback throws an exception, the object does not get added to the collection. Similarly, if a `before_remove` callback throws an exception, the object does not get removed from the collection.
+If a `before_add` callback throws `:abort`, the object does not get added to
+the collection. Similarly, if a `before_remove` callback throws `:abort`, the
+object does not get removed from the collection:
 
+```ruby
+# book won't be added if the limit has been reached
+def check_credit_limit(book)
+  throw(:abort) if limit_reached?
+end
+```
 NOTE: These callbacks are called only when the associated objects are added or removed through the association collection:
 
 ```ruby
@@ -2470,7 +2511,7 @@ single database table, Rails will save in this column the name of the model that
 is being saved. In our example, this can be "Car", "Motorcycle" or "Bicycle."
 STI won't work without a "type" field in the table.
 
-Next, we will generate the three models that inherit from Vehicle. For this,
+Next, we will generate the Car model that inherits from Vehicle. For this,
 we can use the `--parent=PARENT` option, which will generate a model that
 inherits from the specified parent and without equivalent migration (since the
 table already exists).
